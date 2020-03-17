@@ -1,0 +1,153 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: ant-pipeline
+parameters:
+- name: APP_NAME
+  description: The name assigned to all of the application objects defined in this template.
+  displayName: Application Name
+  required: true
+  value: jenkins-os-demo-ant
+- name: GIT_SOURCE_URL
+  description: The source URL for the application
+  displayName: Source URL
+  required: true
+  value: https://github.com/lucabarze/jenkins-demo-ant
+- name: GIT_SOURCE_REF
+  description: The source Ref for the application
+  displayName: Source Ref
+  required: true
+  value: master
+objects:
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    labels:
+      app: ${APP_NAME}
+    name: ${APP_NAME}
+  spec: {}
+  status:
+    dockerImageRepository: ""
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    name: jdk
+  spec:
+    tags:
+    - from:
+        kind: DockerImage
+        name: openshift/openjdk18-openshift:latest
+      name: "openjdk18-openshift"
+    - from:
+        kind: ImageStreamTag
+        name: "openjdk18-openshift"
+      name: latest
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    annotations:
+      pipeline.alpha.openshift.io/uses: '[{"name": "${NAME}", "namespace": "", "kind": "DeploymentConfig"}]'
+    creationTimestamp: null
+    labels:
+      name: ${APP_NAME}
+    name: ${APP_NAME}
+  spec:
+    strategy:
+      jenkinsPipelineStrategy:
+        jenkinsfile: |-
+          try {
+             timeout(time: 20, unit: 'MINUTES') {
+                def appName="${APP_NAME}"
+                def project=""
+
+                node {
+                  stage("Initialize") {
+                    project = env.PROJECT_NAME
+                  }
+                }
+
+                node("ant-1.10.3-jdk8u172") {
+                  stage("Checkout") {
+                    git url: "${GIT_SOURCE_URL}", branch: "${GIT_SOURCE_REF}"
+                  }
+                  stage("Build Jar") {
+                    sh "ant build"
+                    stash name:"jar", includes:"target/ant-sample.jar"
+                  }
+                }
+
+                node {
+                  stage("Build Image") {
+                    unstash name:"jar"
+                    def status = sh(returnStdout: true, script: "oc start-build ${appName}-docker --from-file=target/ant-sample.jar -n ${project}")
+
+                    def result = status.split("\n").find{ it.matches("^build.*started") }
+                    
+                    if(!result) {
+                      echo "ERROR: No started build found for ${appName}"
+                      currentBuild.result = 'FAILURE'
+                      return
+                    }
+                    
+                    // result can be:
+                    // - build "build-name" started
+                    // - build build.build.openshift.io/build-name started
+                    // - build "build.build.openshift.io/build-name" started
+                    // Goal is to isolate "build-name"
+                    def startedBuild = result.replaceAll("build [^0-9a-zA-Z]*", "").replaceAll("[^0-9a-zA-Z]* started", "").replaceFirst("^.*/", "")
+                    echo "Build ${startedBuild} has started. Now watching it ..."
+                    
+                    timeout(time: 20, unit: 'MINUTES') {
+                      openshift.withCluster() {
+                        openshift.withProject() {
+                          def build = openshift.selector('builds', "${startedBuild}")
+                          build.untilEach {
+                            def object = it.object()
+                            if(object.status.phase == "Failed") {
+                              error("Build ${startedBuild} failed")
+                            }
+                            return object.status.phase == "Complete"
+                          }
+                        }
+                      }  
+                    }
+                  }
+                }
+             }
+          } catch (err) {
+             echo "in catch block"
+             echo "Caught: ${err}"
+             currentBuild.result = 'FAILURE'
+             throw err
+          }
+      type: JenkinsPipeline
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    labels:
+      app: ${APP_NAME}-docker
+    name: ${APP_NAME}-docker
+  spec:
+    output:
+      to:
+        kind: ImageStreamTag
+        name: ${APP_NAME}:latest
+    postCommit: {}
+    resources: {}
+    runPolicy: Serial
+    source:
+      dockerfile: |-
+        FROM openjdk18-openshift
+        COPY ant-sample.jar /app/
+        CMD $STI_SCRIPTS_PATH/run
+      binary:
+        asFile: ant-sample.jar
+      type: Docker
+    strategy:
+      dockerStrategy:
+        from:
+          kind: ImageStreamTag
+          name: openjdk18-openshift:latest
+      type: Docker
+    triggers: []
+
