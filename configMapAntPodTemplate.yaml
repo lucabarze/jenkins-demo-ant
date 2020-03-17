@@ -11,7 +11,7 @@ data:
       <name>ant-1.10.3-jdk8u172</name>
       <instanceCap>2147483647</instanceCap>
       <idleMinutes>0</idleMinutes>
-      <label>ant</label>
+      <label>ant-1.10.3-jdk8u172</label>
       <serviceAccount>jenkins</serviceAccount>
       <nodeSelector></nodeSelector>
       <volumes/>
