@@ -8,17 +8,17 @@ data:
   template1: |-
     <org.csanchez.jenkins.plugins.kubernetes.PodTemplate>
       <inheritFrom></inheritFrom>
-      <name>ant-1.10.3-jdk8u172</name>
+      <name>ant</name>
       <instanceCap>2147483647</instanceCap>
       <idleMinutes>0</idleMinutes>
-      <label>ant-1.10.3-jdk8u172</label>
+      <label>ant</label>
       <serviceAccount>jenkins</serviceAccount>
       <nodeSelector></nodeSelector>
       <volumes/>
       <containers>
         <org.csanchez.jenkins.plugins.kubernetes.ContainerTemplate>
           <name>jnlp</name>
-          <image>frekele/ant:1.10.3-jdk8u172</image>
+          <image>docker.io/lucabarze/git-ant:1.10.3-jdk8u242</image>
           <privileged>false</privileged>
           <alwaysPullImage>true</alwaysPullImage>
           <workingDir>/tmp</workingDir>
